@@ -1,0 +1,17 @@
+cluster_name = "local-cluster"
+location = "local-3"
+server_id = 3
+local_deployment = true
+summary_filepath = "../benchmarks/logs/local-run/client-3.json"
+output_filepath = "../benchmarks/logs/local-run/client-3.csv"
+
+[[requests]]
+duration_sec = 5
+requests_per_sec = 10
+read_ratio = 0.25
+
+[[requests]]
+duration_sec = 10
+requests_per_sec = 1
+read_ratio = 0.25
+
