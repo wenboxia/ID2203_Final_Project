@@ -9,6 +9,9 @@ interrupt() {
 }
 trap "interrupt" SIGINT
 
+local_experiment_dir="../benchmarks/logs/local-run"
+mkdir -p "${local_experiment_dir}"
+
 for ((i = 1; i <= cluster_size; i++)); do
     config_path="./server-${i}-config.toml"
     if [ i -eq 3 ]; then

@@ -24,7 +24,6 @@ impl Into<OmniPaxosConfig> for OmniPaxosServerConfig {
             configuration_id: 1,
             nodes: self.nodes,
             flexible_quorum: self.initial_flexible_quorum,
-            initial_leader: None,
         };
         let server_config = ServerConfig {
             pid: self.server_id,
@@ -34,5 +33,15 @@ impl Into<OmniPaxosConfig> for OmniPaxosServerConfig {
             cluster_config,
             server_config,
         }
+    }
+}
+
+impl OmniPaxosServerConfig {
+    pub fn get_peers(&self, node: NodeId) -> Vec<NodeId> {
+        self.nodes
+            .iter()
+            .cloned()
+            .filter(|&id| id != node)
+            .collect()
     }
 }
