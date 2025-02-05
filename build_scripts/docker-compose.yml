@@ -2,9 +2,6 @@
 x-common-variables: &common-variables
   RUST_LOG: "debug"
   CONFIG_FILE: "~/server-config.toml"
-  # LOCAL: "false"
-  # TCP_CC: "false"
-  # OPTIMIZE: "true"
 
 services:
   s1:
