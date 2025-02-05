@@ -15,14 +15,16 @@ class OmnipaxosCluster:
     start instances, configure and launch Omnipaxos containers, and manage logs and shutdown operations.
 
     Deployment Steps:
-    1. Push Omnipaxos server and client Docker images to GCR (Google Cloud Registry).
-       See `../build_scripts/push-server-image.sh` and `../build_scripts/push-client-image.sh` for details.
-    2. `__init__` Initializes the cluster by creating GCP instances (using the GcpCluster class) for Omnipaxos servers and clients.
-       The instances will run startup scripts (passed via ClusterConfig) to configure Docker for the gcloud OS login user.
-    3. Use `run()` to SSH into client and server instances, pass configuration files,
-       and run Docker containers from the artifact registry. This also waits for client processes to finish
-       and then pulls logs from the server and client GCP instances
-    6. Use `shutdown()` to shut down the GCP instances (or leave them running for reuse).
+    1.   Configure gcloud authentication. See `../build_scripts/auth.sh`
+    2.   Push Omnipaxos server and client Docker images to GCR (Google Cloud Registry).
+         See `../build_scripts/push-server-image.sh` and `../build_scripts/push-client-image.sh` for details.
+    3-4. `__init__` Initializes the cluster by creating GCP instances (using the GcpCluster class) for Omnipaxos servers and clients.
+         The instances will run startup scripts (passed via ClusterConfig) to configure Docker for the gcloud OS login user and assign
+         DNS names to the servers.
+    5-6. Use `run()` to SSH into client and server instances, pass configuration files,
+         and run Docker containers from the artifact registry. This also waits for client processes to finish
+         and then pulls logs from the server and client GCP instances
+    7.   Use `shutdown()` to shut down the GCP instances (or leave them running for reuse).
     """
 
     _cluster_config: ClusterConfig

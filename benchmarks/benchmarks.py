@@ -52,7 +52,7 @@ def example_benchmark():
     cluster.run(iteration_dir)
 
     # Shutdown GCP instances (or not if you want to reuse instances in another benchmark)
-    # cluster.shutdown()
+    cluster.shutdown()
 
 
 def main():
