@@ -3,6 +3,7 @@ use chrono::Utc;
 use log::*;
 use omnipaxos::{
     ballot_leader_election::Ballot,
+    messages::Message,
     storage::Storage,
     util::{LogEntry, NodeId},
     OmniPaxos, OmniPaxosConfig,
@@ -14,6 +15,7 @@ use std::{fs::File, io::Write, time::Duration};
 type OmniPaxosInstance = OmniPaxos<Command, MemoryStorage<Command>>;
 const NETWORK_BATCH_SIZE: usize = 100;
 const LEADER_WAIT: Duration = Duration::from_secs(1);
+const ELECTION_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub struct OmniPaxosServer {
     id: NodeId,
@@ -21,6 +23,7 @@ pub struct OmniPaxosServer {
     network: Network,
     omnipaxos: OmniPaxosInstance,
     current_decided_idx: usize,
+    omnipaxos_msg_buffer: Vec<Message<Command>>,
     output_file: File,
     config: OmniPaxosServerConfig,
     peers: Vec<NodeId>,
@@ -28,6 +31,7 @@ pub struct OmniPaxosServer {
 
 impl OmniPaxosServer {
     pub async fn new(config: OmniPaxosServerConfig) -> Self {
+        // Initialize OmniPaxos instance
         let mut storage: MemoryStorage<Command> = MemoryStorage::default();
         let init_leader_ballot = Ballot {
             config_id: 0,
@@ -39,7 +43,10 @@ impl OmniPaxosServer {
             .set_promise(init_leader_ballot)
             .expect("Failed to write to storage");
         let omnipaxos_config: OmniPaxosConfig = config.clone().into();
+        let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
+
+        // Wait for client and server network connections to be established
         let network = Network::new(
             config.cluster_name.clone(),
             config.server_id,
@@ -56,12 +63,11 @@ impl OmniPaxosServer {
             network,
             omnipaxos,
             current_decided_idx: 0,
+            omnipaxos_msg_buffer,
             output_file,
             peers: config.get_peers(config.server_id),
             config,
         };
-        // Clears outgoing_messages of initial BLE messages
-        let _ = server.omnipaxos.outgoing_messages();
         // Save config to output file
         server.save_output().expect("Failed to write to file");
         server
@@ -74,70 +80,59 @@ impl OmniPaxosServer {
         // Once the leader is established it chooses a synchronization point which the
         // followers relay to their clients to begin the experiment.
         if self.config.initial_leader == self.id {
-            // self.become_initial_leader(&mut cluster_msg_buf, &mut client_msg_buf)
-            //     .await;
+            self.become_initial_leader(&mut cluster_msg_buf, &mut client_msg_buf)
+                .await;
             let experiment_sync_start = (Utc::now() + Duration::from_secs(2)).timestamp_millis();
             self.send_cluster_start_signals(experiment_sync_start);
             self.send_client_start_signals(experiment_sync_start);
         }
         // Main event loop
+        let mut election_interval = tokio::time::interval(ELECTION_TIMEOUT);
         loop {
             tokio::select! {
+                _ = election_interval.tick() => {
+                    self.omnipaxos.tick();
+                    self.send_outgoing_msgs();
+                },
                 _ = self.network.cluster_messages.recv_many(&mut cluster_msg_buf, NETWORK_BATCH_SIZE) => {
-                    debug!("{}: Cluster messages {}" , self.id, cluster_msg_buf.len());
                     self.handle_cluster_messages(&mut cluster_msg_buf).await;
                 },
                 _ = self.network.client_messages.recv_many(&mut client_msg_buf, NETWORK_BATCH_SIZE) => {
-                    debug!("{}: Client messages {}" , self.id, client_msg_buf.len());
                     self.handle_client_messages(&mut client_msg_buf).await;
                 },
             }
         }
     }
 
-    // // Ensures cluster is connected and leader is promoted before returning.
-    // async fn become_initial_leader(
-    //     &mut self,
-    //     cluster_msg_buffer: &mut Vec<(NodeId, ClusterMessage)>,
-    //     client_msg_buffer: &mut Vec<(ClientId, ClientMessage)>,
-    // ) {
-    //     let mut leader_attempt = 0;
-    //     let mut leader_takeover_interval = tokio::time::interval(LEADER_WAIT);
-    //     loop {
-    //         tokio::select! {
-    //             _ = leader_takeover_interval.tick() => {
-    //                 self.take_leadership(&mut leader_attempt).await;
-    //                 if self.omnipaxos.is_accept_phase_leader() {
-    //                     info!("{}: Leader fully initialized", self.id);
-    //                     break;
-    //                 }
-    //             },
-    //             _ = self.network.cluster_messages.recv_many(cluster_msg_buffer, NETWORK_BATCH_SIZE) => {
-    //                 self.handle_cluster_messages(cluster_msg_buffer).await;
-    //             },
-    //             _ = self.network.client_messages.recv_many(client_msg_buffer, NETWORK_BATCH_SIZE) => {
-    //                 self.handle_client_messages(client_msg_buffer).await;
-    //             },
-    //         }
-    //     }
-    // }
-    //
-    // async fn take_leadership(&mut self, leader_attempt: &mut u32) {
-    //     if self.omnipaxos.is_accept_phase_leader() {
-    //         return;
-    //     }
-    //     let mut ballot = omnipaxos::ballot_leader_election::Ballot::default();
-    //     *leader_attempt += 1;
-    //     ballot.n = *leader_attempt;
-    //     ballot.pid = self.id;
-    //     ballot.config_id = 1;
-    //     info!(
-    //         "Node: {:?}, Initializing prepare phase with ballot: {:?}",
-    //         self.id, ballot
-    //     );
-    //     self.omnipaxos.initialize_prepare_phase(ballot);
-    //     self.send_outgoing_msgs();
-    // }
+    // Ensures cluster is connected and leader is promoted before returning.
+    async fn become_initial_leader(
+        &mut self,
+        cluster_msg_buffer: &mut Vec<(NodeId, ClusterMessage)>,
+        client_msg_buffer: &mut Vec<(ClientId, ClientMessage)>,
+    ) {
+        let mut leader_takeover_interval = tokio::time::interval(LEADER_WAIT);
+        loop {
+            tokio::select! {
+                _ = leader_takeover_interval.tick() => {
+                    if let Some((curr_leader, is_accept_phase)) = self.omnipaxos.get_current_leader(){
+                        if curr_leader == self.id && is_accept_phase {
+                            info!("{}: Leader fully initialized", self.id);
+                            break;
+                        }
+                    }
+                    info!("{}: Attempting to take leadership", self.id);
+                    self.omnipaxos.try_become_leader();
+                    self.send_outgoing_msgs();
+                },
+                _ = self.network.cluster_messages.recv_many(cluster_msg_buffer, NETWORK_BATCH_SIZE) => {
+                    self.handle_cluster_messages(cluster_msg_buffer).await;
+                },
+                _ = self.network.client_messages.recv_many(client_msg_buffer, NETWORK_BATCH_SIZE) => {
+                    self.handle_client_messages(client_msg_buffer).await;
+                },
+            }
+        }
+    }
 
     fn handle_decided_entries(&mut self) {
         // TODO: Can use a read_raw here to avoid allocation
@@ -175,8 +170,9 @@ impl OmniPaxosServer {
     }
 
     fn send_outgoing_msgs(&mut self) {
-        let messages = self.omnipaxos.outgoing_messages();
-        for msg in messages {
+        self.omnipaxos
+            .take_outgoing_messages(&mut self.omnipaxos_msg_buffer);
+        for msg in self.omnipaxos_msg_buffer.drain(..) {
             let to = msg.get_receiver();
             let cluster_msg = ClusterMessage::OmniPaxosMessage(msg);
             self.network.send_to_cluster(to, cluster_msg);
@@ -196,6 +192,7 @@ impl OmniPaxosServer {
 
     async fn handle_cluster_messages(&mut self, messages: &mut Vec<(NodeId, ClusterMessage)>) {
         for (_from, message) in messages.drain(..) {
+            trace!("{}: Received {message:?}", self.id);
             match message {
                 ClusterMessage::OmniPaxosMessage(m) => {
                     self.omnipaxos.handle_incoming(m);

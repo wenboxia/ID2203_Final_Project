@@ -8,3 +8,4 @@ The `build_scripts` directory contains various utilities for configuring and run
  - `push-client-image.sh` builds the client docker image and pushes it to the benchmarking GCP project's artifact registry
  - `push-server-image.sh` builds the server docker image and pushes it to the benchmarking GCP project's artifact registry
  - `docker-compose.yml` docker compose for a 3 server cluster. TODO: needs updating
+ - See `benchmarks/README.md` for benchmarking scripts 
