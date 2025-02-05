@@ -1,19 +1,25 @@
-# AutoQuroum Benchmarks
-The most applicable aspect of this project to other projects is the `GcpCluster` defined in `gcp_cluster.py`. It provides a class for starting, stopping, and SSH-ing a cluster of GCP instances. It assumes instances communicate via Google's VPC, and assumes the existence of an internal network named `internal.zone.`. Instance settings can be configured, see `InstanceConfig`, however instances are hardcoded to use the container-optimized cos family OS. Note that there is a delay between when an instance is created and when it becomes SSH-able, AutoQuroumCluster solves this with a retry mechanism.
+# Omnipaxos-kv Benchmarks
+Benchmarking code for configuring and deploying omnipaxos-kv servers and clients to [GCP](https://cloud.google.com) as docker containers. Uses the GCP python client API to provison GCP instances. Then uses gcloud for authentication and starting servers/clients via SSHing into the provisioned instances. The project is currently setup to run an example benchmark using the omnipaxos-kv omnipaxos-server and omnipaxos-client images.
 
-Documentation on the GCP python client API seems to be scarce. The best resource I've found are the samples (here)[https://github.com/GoogleCloudPlatform/python-docs-samples/tree/main/compute].
+Documentation on the GCP python client API seems to be scarce. The best resource I've found are the samples [here](https://github.com/GoogleCloudPlatform/python-docs-samples/tree/main/compute).
+## Prerequisites
+ - [gcloud](https://cloud.google.com/sdk/gcloud) CLI tool for interacting with GCP
+ - [uv](https://docs.astral.sh/uv/) a Python project/package manager.
 ## Project Structure
  - `setup-gcp.sh` Initial GCP setup. Only necessary if you are starting a new GCP project.
- - `gcp_cluster.py` Manage cluster of GCP instances. 
- - `autoquroum_cluster.py` Manage AutoQuroum GCP cluster.
- - `autoquroum_configs.py` Defines configs for AutoQuroum.
- - `benchmarks.py` Run AutoQuroum benchmarks, results saved to `logs/`
+ - `gcp_cluster.py` Manage cluster of GCP instances.
+ - `gcp_ssh_client.py` Manage SSH connections to GCP instances.
+ - `omnipaxos_cluster.py` Manage omnipaxos-kv GCP cluster.
+ - `omnipaxos_configs.py` Defines configs for omnipaxos-kv.
+ - `benchmarks.py` Run example benchmarks, results saved to `logs/`
  - `graph_experiment.py` Graph benchmark data in `logs/`
-## Dependencies
- - (gcloud)[https://cloud.google.com/sdk/gcloud] CLI tool for interacting with GCP
- - (uv)[https://docs.astral.sh/uv/] a Python project/package manager.
+## Deployment steps
+![gcp-diagram](https://github.com/user-attachments/assets/7dcea25f-f2f5-44a9-a15e-7c18a7e5f517)
+
 ## To Run
  1. Have an owner of the GCP project add you to the project and configure your permissions. Or start your own project with the help of `setup-gcp.sh`
  2. Run the commands in `../build_scripts/auth.sh` to configure your gcloud credentials
- 3. Run python code with `uv run <python-file-here>`.
- 4. Run `uv run benchmarks.py` to run a AutoQuroum benchmark. Run `uv run graph_experiment.py` to graph benchmark data.
+ 3. Make sure that you have a GCP OSLogin ssh key set up `gcloud compute os-login ssh-keys list`
+ 4. Run python code with `uv run <python-file-here>`.
+ 5. Run `uv run benchmarks.py` to run the example benchmark. Run `uv run graph_experiment.py` to graph benchmark data.
+

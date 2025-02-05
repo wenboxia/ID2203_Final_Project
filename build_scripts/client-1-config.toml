@@ -1,7 +1,7 @@
 cluster_name = "local-cluster"
 location = "local-1"
-server_id = 1
-local_deployment = true
+server_id = 1 # the server to connect to
+local_deployment = true # use localhost
 summary_filepath = "../benchmarks/logs/local-run/client-1.json"
 output_filepath = "../benchmarks/logs/local-run/client-1.csv"
 

@@ -177,7 +177,7 @@ Run: gcloud dns managed-zones create internal-network \\
         username = get_username_process.stdout.strip()
         if get_username_process.returncode != 0 or not username:
             raise ValueError(
-                f"Couldn't find gcloud os-login username. Configure gcloud credentials with `gcloud auth login`\n{get_username_process.stderr}"
+                f"{get_username_process.stderr}\nCouldn't find gcloud os-login username. Configure gcloud credentials with `gcloud auth login`\nIf you've already authenticated, you may need to setup an SSH key with gcloud"
             )
         else:
             return username

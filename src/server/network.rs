@@ -37,6 +37,8 @@ pub struct Network {
 }
 
 impl Network {
+    // Creates a new network with connections other server nodes in the cluster and any clients.
+    // Waits until connections to all servers and clients are established before resolving.
     pub async fn new(
         cluster_name: String,
         id: NodeId,
@@ -110,7 +112,7 @@ impl Network {
             loop {
                 match listener.accept().await {
                     Ok((tcp_stream, socket_addr)) => {
-                        debug!("New connection from {socket_addr}");
+                        info!("New connection from {socket_addr}");
                         tcp_stream.set_nodelay(true).unwrap();
                         tokio::spawn(Self::handle_incoming_connection(
                             tcp_stream,
@@ -172,7 +174,7 @@ impl Network {
                 return;
             }
             None => {
-                debug!("Connection to unidentified source dropped");
+                info!("Connection to unidentified source dropped");
                 return;
             }
         };
@@ -307,7 +309,6 @@ impl PeerConnection {
                 for msg in messages {
                     match msg {
                         Ok(m) => {
-                            trace!("Received: {m:?}");
                             if let Err(_) = incoming_messages.send((peer_id, m)).await {
                                 break;
                             };
