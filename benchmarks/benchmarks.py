@@ -22,7 +22,7 @@ def example_workload() -> dict[int, list[RequestInterval]]:
     return workload
 
 
-def example_benchmark():
+def example_benchmark(num_runs: int = 3):
     # Define workload and cluster
     workload = example_workload()
     cluster = (
@@ -41,15 +41,21 @@ def example_benchmark():
     ).build()
     experiment_log_dir = Path(f"./logs/example-experiment")
 
-    # Run cluster
-    iteration_dir = Path.joinpath(experiment_log_dir, "MajorityQuorum")
-    cluster.run(iteration_dir)
-
-    # Run same cluster again but with different flexible quorum config
+    majority_quorum = FlexibleQuorum(read_quorum_size=3, write_quorum_size=3)
     flex_quorum = FlexibleQuorum(read_quorum_size=4, write_quorum_size=2)
-    cluster.change_cluster_config(initial_flexible_quorum=flex_quorum)
-    iteration_dir = Path.joinpath(experiment_log_dir, "FlexQuorum")
-    cluster.run(iteration_dir)
+    for run in range(num_runs):
+        # Run cluster with majority quorum
+        cluster.change_cluster_config(initial_flexible_quorum=majority_quorum)
+        iteration_dir = Path.joinpath(experiment_log_dir, f"MajorityQuorum/run-{run}")
+        print("RUNNING:", iteration_dir)
+        cluster.run(iteration_dir)
+
+        # Run same cluster again but with flexible quorum
+        flex_quorum = FlexibleQuorum(read_quorum_size=4, write_quorum_size=2)
+        cluster.change_cluster_config(initial_flexible_quorum=flex_quorum)
+        iteration_dir = Path.joinpath(experiment_log_dir, f"FlexQuorum/run-{run}")
+        print("RUNNING:", iteration_dir)
+        cluster.run(iteration_dir)
 
     # Shutdown GCP instances (or not if you want to reuse instances in another benchmark)
     cluster.shutdown()

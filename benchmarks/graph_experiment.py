@@ -176,7 +176,6 @@ def create_base_figure(clients_data: dict[int, pd.DataFrame]):
     fig.gca().xaxis.set_major_formatter(myFmt)
     axs[0].tick_params(bottom=False)
     axs[1].tick_params(bottom=False)
-    # graph_strategy_changes(axs[0], strategy_data)
     graph_relative_request_rate_subplot(axs[1], clients_data)
     # graph_request_rate_subplot(axs[1], clients_data)
     # plt.tight_layout()
@@ -318,9 +317,8 @@ def graph_average_latency_comparison_all(
 
 def graph_example_bench():
     experiment_directory = "example-experiment"
-    majority_dir = experiment_directory + "/MajorityQuorum"
-    flexible_dir = experiment_directory + "/FlexQuorum"
-
+    majority_dir = experiment_directory + "/MajorityQuorum/run-0"
+    flexible_dir = experiment_directory + "/FlexQuorum/run-0"
 
     labels = {"MajorityQuorum": "Majority Quorum", "FlexQuorum": "Flexible Quorum"}
     legend_args = {
