@@ -22,5 +22,6 @@ Documentation on the GCP python client API seems to be scarce. The best resource
  3. Run the commands in `./scripts/auth.sh` to configure your gcloud credentials
  4. Run `./scripts/push-server-image.sh` and `./scripts/push-client-image.sh` to push docker images to GCP Artifact Registry
  5. Run python code with `uv run <python-file-here>`.
- 6. Run `uv run benchmarks.py` to run the example benchmark. Run `uv run graph_experiment.py` to graph benchmark data.
+     - `uv run benchmarks.py` to run the example benchmark
+     - `uv run graph_experiment.py` to graph benchmark data
 
