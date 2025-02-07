@@ -10,7 +10,7 @@ project_id=my-project-1499979282244
 image_name="gcr.io/${project_id}/omnipaxos_server"
 
 println_green "Building server docker image with name '${image_name}'"
-docker build -t "${image_name}" -f  ../server.dockerfile ../
+docker build --platform linux/amd64 -t "${image_name}" -f  ../server.dockerfile ../
 
 println_green "Pushing '${image_name}' to registry"
 docker push "${image_name}"
