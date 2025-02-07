@@ -26,7 +26,7 @@ def example_benchmark(num_runs: int = 3):
     # Define workload and cluster
     workload = example_workload()
     cluster = (
-        OmnipaxosClusterBuilder("cluster-5-1")
+        OmnipaxosClusterBuilder("cluster-1")
         .initial_leader(5)
         .server(1, "us-west2-a")
         .server(2, "us-south1-a")

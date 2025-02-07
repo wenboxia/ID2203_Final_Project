@@ -43,7 +43,7 @@ class GcpCluster:
 
     It relies on Google Cloud SDK (gcloud) for managing credentials and SSH access to instances.
     Application Default Credentials are used when creating instances, and OS login credentials
-    are used for SSH. To configure gcloud credentials, refer to `../build_scripts/auth.sh`.
+    are used for SSH. To configure gcloud credentials, refer to `./scripts/auth.sh`.
 
     Assumptions:
         - A VPC network named `internal.zone.` exists.
@@ -159,29 +159,6 @@ Run: gcloud dns managed-zones create internal-network \\
         p = subprocess.Popen(gcloud_command, shell=False)
         return p
 
-    @staticmethod
-    def get_oslogin_username() -> str:
-        get_username_process = subprocess.run(
-            [
-                "gcloud",
-                "compute",
-                "os-login",
-                "describe-profile",
-                "--format=value(posixAccounts[0].username)",
-            ],
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        username = get_username_process.stdout.strip()
-        if get_username_process.returncode != 0 or not username:
-            raise ValueError(
-                f"{get_username_process.stderr}\nCouldn't find gcloud os-login username. Configure gcloud credentials with `gcloud auth login`\nIf you've already authenticated, you may need to setup an SSH key with gcloud"
-            )
-        else:
-            return username
-
     # Shutdown all currently running instances
     def shutdown(self):
         self.shutdown_instances(list(self.instances.keys()))
@@ -296,10 +273,10 @@ Run: gcloud dns managed-zones create internal-network \\
         tags = types.Tags()
         if instance_config.firewall_tag:
             tags.items = [instance_config.firewall_tag]
-        # scheduling = types.Scheduling(
-        #         provisioning_model=compute_v1.Scheduling.ProvisioningModel.SPOT.name,
-        #         instance_termination_action="STOP"
-        #         )
+        scheduling = types.Scheduling(
+                provisioning_model=compute_v1.Scheduling.ProvisioningModel.SPOT.name,
+                instance_termination_action="STOP"
+                )
         os_service_accounts = (
             [
                 types.ServiceAccount(

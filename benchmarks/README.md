@@ -18,8 +18,9 @@ Documentation on the GCP python client API seems to be scarce. The best resource
 
 ## To Run
  1. Have an owner of the GCP project add you to the project and configure your permissions. Or start your own project with the help of `setup-gcp.sh`
- 2. Run the commands in `../build_scripts/auth.sh` to configure your gcloud credentials
- 3. Make sure that you have a GCP OSLogin ssh key set up `gcloud compute os-login ssh-keys list`
- 4. Run python code with `uv run <python-file-here>`.
- 5. Run `uv run benchmarks.py` to run the example benchmark. Run `uv run graph_experiment.py` to graph benchmark data.
+ 2. Copy the contents of `./scripts/project_env_template` to `./scripts/project_env.sh` and then configure environment variables in `./scripts/project_env.sh`
+ 3. Run the commands in `./scripts/auth.sh` to configure your gcloud credentials
+ 4. Run `./scripts/push-server-image.sh` and `./scripts/push-client-image.sh` to push docker images to GCP Artifact Registry
+ 5. Run python code with `uv run <python-file-here>`.
+ 6. Run `uv run benchmarks.py` to run the example benchmark. Run `uv run graph_experiment.py` to graph benchmark data.
 

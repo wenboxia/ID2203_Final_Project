@@ -204,3 +204,6 @@ service-account-key.json
 # Generated files
 logs/
 graphs/
+
+# User specific config
+project_env.sh

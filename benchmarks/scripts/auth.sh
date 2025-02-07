@@ -1,8 +1,11 @@
+#!/bin/bash
+
+source ./project_env.sh # Get PROJECT_NAME env var
+
 # Set the default project for gcloud commands to the specified project ID.
 # This ensures all future gcloud commands will use this project by default,
 # so you don't need to specify the --project flag each time.
-project_id=my-project-1499979282244
-gcloud config set project ${project_id}
+gcloud config set project $PROJECT_ID
 
 # Log in to your Google account to authenticate the gcloud CLI.
 # This opens a browser window for Google account authentication, giving gcloud

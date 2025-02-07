@@ -15,9 +15,9 @@ class OmnipaxosCluster:
     start instances, configure and launch Omnipaxos containers, and manage logs and shutdown operations.
 
     Deployment Steps:
-    1.   Configure gcloud authentication. See `../build_scripts/auth.sh`
+    1.   Configure project settings (See `./scripts/project_env.sh`). Configure gcloud authentication (see `./scripts/auth.sh`).
     2.   Push Omnipaxos server and client Docker images to GCR (Google Cloud Registry).
-         See `../build_scripts/push-server-image.sh` and `../build_scripts/push-client-image.sh` for details.
+         See `./scripts/push-server-image.sh` and `./scripts/push-client-image.sh` for details.
     3-4. `__init__` Initializes the cluster by creating GCP instances (using the GcpCluster class) for Omnipaxos servers and clients.
          The instances will run startup scripts (passed via ClusterConfig) to configure Docker for the gcloud OS login user and assign
          DNS names to the servers.
@@ -213,19 +213,34 @@ class OmnipaxosCluster:
 class OmnipaxosClusterBuilder:
     """
     Builder class for defining and validating configurations to start a OmnipaxosCluster.
+    Relies on environment variables from `./scripts/project_env.sh` to configure settings.
     """
 
-    # TODO: project_id in env vars
-    def __init__(
-        self, cluster_name: str, project_id: str = "my-project-1499979282244"
-    ) -> None:
-        self.cluster_name = cluster_name
-        self._project_id = project_id
-        self._service_account = f"deployment@{project_id}.iam.gserviceaccount.com"
-        self._gcloud_ssh_user = GcpCluster.get_oslogin_username()
-        # TODO: put image paths into env variables
-        self._server_docker_image_path = f"gcr.io/{project_id}/omnipaxos_server"
-        self._client_docker_image_path = f"gcr.io/{project_id}/omnipaxos_client"
+    def __init__(self, cluster_name: str) -> None:
+        env_keys = [
+            "PROJECT_ID",
+            "SERVICE_ACCOUNT",
+            "OSLOGIN_USERNAME",
+            "OSLOGIN_UID",
+            "CLIENT_DOCKER_IMAGE_NAME",
+            "SERVER_DOCKER_IMAGE_NAME",
+        ]
+        env_vals = {}
+        process = subprocess.run(['bash', '-c', 'source ./scripts/project_env.sh && env'], check=True, stdout= subprocess.PIPE, text=True)
+        for line in process.stdout.split("\n"):
+            (key, _, value) = line.partition("=")
+            if key in env_keys:
+                env_keys.remove(key)
+                env_vals[key] = value
+        for key in env_keys:
+            raise ValueError(f"{key} env var must be set. Sourcing from ./scripts/project_env.sh")
+        self.cluster_name = f"{cluster_name}"
+        self._project_id = env_vals["PROJECT_ID"]
+        self._service_account = env_vals["SERVICE_ACCOUNT"]
+        self._gcloud_ssh_user = env_vals["OSLOGIN_USERNAME"]
+        self._gcloud_oslogin_uid = env_vals['OSLOGIN_UID']
+        self._server_docker_image_name = env_vals["SERVER_DOCKER_IMAGE_NAME"]
+        self._client_docker_image_name = env_vals["CLIENT_DOCKER_IMAGE_NAME"]
         self._server_configs: dict[int, ServerConfig] = {}
         self._client_configs: dict[int, ClientConfig] = {}
         # Cluster-wide settings
@@ -242,10 +257,10 @@ class OmnipaxosClusterBuilder:
         if server_id in self._server_configs.keys():
             raise ValueError(f"Server {server_id} already exists")
         instance_config = InstanceConfig(
-            f"{self.cluster_name}-server-{server_id}",
+            f"{self.cluster_name}-server-{server_id}-{self._gcloud_oslogin_uid}",
             zone,
             machine_type,
-            self._docker_startup_script(self._server_docker_image_path),
+            self._docker_startup_script(self._server_docker_image_name),
             dns_name=f"{self.cluster_name}-server-{server_id}",
             service_account=self._service_account,
         )
@@ -270,10 +285,10 @@ class OmnipaxosClusterBuilder:
         if server_id in self._client_configs.keys():
             raise ValueError(f"Client {server_id} already exists")
         instance_config = InstanceConfig(
-            f"{self.cluster_name}-client-{server_id}",
+            f"{self.cluster_name}-client-{server_id}-{self._gcloud_oslogin_uid}",
             zone,
             machine_type,
-            self._docker_startup_script(self._client_docker_image_path),
+            self._docker_startup_script(self._client_docker_image_name),
             service_account=self._service_account,
         )
         client_config = ClientConfig(
@@ -317,8 +332,8 @@ class OmnipaxosClusterBuilder:
             initial_flexible_quorum=self._initial_quorum,
             server_configs=self._server_configs,
             client_configs=self._client_configs,
-            client_image=self._client_docker_image_path,
-            server_image=self._server_docker_image_path,
+            client_image=self._client_docker_image_name,
+            server_image=self._server_docker_image_name,
         )
         return OmnipaxosCluster(self._project_id, cluster_config)
 
