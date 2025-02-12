@@ -49,7 +49,7 @@ impl OmniPaxosServer {
 
     pub async fn run(&mut self) {
         // Save config to output file
-        // self.save_output().expect("Failed to write to file");
+        self.save_output().expect("Failed to write to file");
         let mut client_msg_buf = Vec::with_capacity(NETWORK_BATCH_SIZE);
         let mut cluster_msg_buf = Vec::with_capacity(NETWORK_BATCH_SIZE);
         // We don't use Omnipaxos leader election and instead force an initial leader

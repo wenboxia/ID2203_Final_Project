@@ -55,9 +55,9 @@ impl Into<OmniPaxosConfig> for OmniPaxosKVConfig {
 
 impl OmniPaxosKVConfig {
     pub fn new() -> Result<Self, ConfigError> {
-        let local_config_file = match env::var("LOCAL_CONFIG_FILE") {
+        let local_config_file = match env::var("SERVER_CONFIG_FILE") {
             Ok(file_path) => file_path,
-            Err(_) => panic!("Requires LOCAL_CONFIG_FILE environment variable to be set"),
+            Err(_) => panic!("Requires SERVER_CONFIG_FILE environment variable to be set"),
         };
         let cluster_config_file = match env::var("CLUSTER_CONFIG_FILE") {
             Ok(file_path) => file_path,

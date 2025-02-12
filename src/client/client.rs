@@ -101,7 +101,7 @@ impl Client {
             self.id,
             self.client_data.response_count(),
         );
-        self.network.shutdown().await;
+        self.network.shutdown();
         self.save_results().expect("Failed to save results");
     }
 
