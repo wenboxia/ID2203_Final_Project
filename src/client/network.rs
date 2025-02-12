@@ -1,7 +1,7 @@
 use futures::{SinkExt, StreamExt};
 use log::*;
 use omnipaxos_kv::common::{kv::NodeId, messages::*, utils::*};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{self, channel};
@@ -11,47 +11,41 @@ use tokio::{sync::mpsc::Sender, time::interval};
 use tokio_util::sync::CancellationToken;
 
 pub struct Network {
-    cluster_name: String,
-    is_local: bool,
     server_connections: Vec<Option<ServerConnection>>,
-    batch_size: usize,
     server_message_sender: Sender<ServerMessage>,
     pub server_messages: Receiver<ServerMessage>,
+    batch_size: usize,
     cancel_token: CancellationToken,
 }
 
 const RETRY_SERVER_CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl Network {
-    pub async fn new(
-        cluster_name: String,
-        server_ids: Vec<NodeId>,
-        local_deployment: bool,
-        batch_size: usize,
-    ) -> Self {
+    pub async fn new(servers: Vec<(NodeId, String)>, batch_size: usize) -> Self {
         let mut server_connections = vec![];
-        let max_server_id = *server_ids.iter().max().unwrap() as usize;
+        let max_server_id = *servers.iter().map(|(id, _)| id).max().unwrap() as usize;
         server_connections.resize_with(max_server_id + 1, Default::default);
         let (server_message_sender, server_messages) = channel(batch_size);
         let mut network = Self {
-            cluster_name,
-            is_local: local_deployment,
             server_connections,
             batch_size,
             server_message_sender,
             server_messages,
             cancel_token: CancellationToken::new(),
         };
-        network.initialize_connections(server_ids).await;
+        network.initialize_connections(servers).await;
         network
     }
 
-    async fn initialize_connections(&mut self, server_ids: Vec<NodeId>) {
+    async fn initialize_connections(&mut self, servers: Vec<(NodeId, String)>) {
         info!("Establishing server connections");
-        let mut connection_tasks = Vec::with_capacity(server_ids.len());
-        for server_id in &server_ids {
-            let server_address = get_node_addr(&self.cluster_name, *server_id, self.is_local)
-                .expect("Couldn't resolve server IP");
+        let mut connection_tasks = Vec::with_capacity(servers.len());
+        for (server_id, server_addr_str) in &servers {
+            let server_address = server_addr_str
+                .to_socket_addrs()
+                .expect("Unable to resolve server IP")
+                .next()
+                .unwrap();
             let task = tokio::spawn(Self::get_server_connection(*server_id, server_address));
             connection_tasks.push(task);
         }
@@ -59,7 +53,7 @@ impl Network {
         for (i, result) in finished_tasks.into_iter().enumerate() {
             match result {
                 Ok((from_server_conn, to_server_conn)) => {
-                    let connected_server_id = server_ids[i];
+                    let connected_server_id = servers[i].0;
                     info!("Connected to server {connected_server_id}");
                     let server_idx = connected_server_id as usize;
                     let server_connection = ServerConnection::new(
@@ -73,7 +67,7 @@ impl Network {
                     self.server_connections[server_idx] = Some(server_connection)
                 }
                 Err(err) => {
-                    let failed_server = server_ids[i];
+                    let failed_server = servers[i].0;
                     panic!("Unable to establish connection to server {failed_server}: {err}")
                 }
             }

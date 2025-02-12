@@ -1,10 +1,8 @@
-use crate::{configs::OmniPaxosServerConfig, database::Database, network::Network};
+use crate::{configs::OmniPaxosKVConfig, database::Database, network::Network};
 use chrono::Utc;
 use log::*;
 use omnipaxos::{
-    ballot_leader_election::Ballot,
     messages::Message,
-    storage::Storage,
     util::{LogEntry, NodeId},
     OmniPaxos, OmniPaxosConfig,
 };
@@ -24,62 +22,40 @@ pub struct OmniPaxosServer {
     omnipaxos: OmniPaxosInstance,
     current_decided_idx: usize,
     omnipaxos_msg_buffer: Vec<Message<Command>>,
-    output_file: File,
-    config: OmniPaxosServerConfig,
+    config: OmniPaxosKVConfig,
     peers: Vec<NodeId>,
 }
 
 impl OmniPaxosServer {
-    pub async fn new(config: OmniPaxosServerConfig) -> Self {
+    pub async fn new(config: OmniPaxosKVConfig) -> Self {
         // Initialize OmniPaxos instance
-        let mut storage: MemoryStorage<Command> = MemoryStorage::default();
-        let init_leader_ballot = Ballot {
-            config_id: 0,
-            n: 1,
-            priority: 0,
-            pid: config.initial_leader,
-        };
-        storage
-            .set_promise(init_leader_ballot)
-            .expect("Failed to write to storage");
+        let storage: MemoryStorage<Command> = MemoryStorage::default();
         let omnipaxos_config: OmniPaxosConfig = config.clone().into();
         let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
-
-        // Wait for client and server network connections to be established
-        let network = Network::new(
-            config.cluster_name.clone(),
-            config.server_id,
-            config.nodes.clone(),
-            config.num_clients,
-            config.local_deployment.unwrap_or(false),
-            NETWORK_BATCH_SIZE,
-        )
-        .await;
-        let output_file = File::create(config.output_filepath.clone()).unwrap();
-        let mut server = OmniPaxosServer {
-            id: config.server_id,
+        // Waits for client and server network connections to be established
+        let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
+        OmniPaxosServer {
+            id: config.local.server_id,
             database: Database::new(),
             network,
             omnipaxos,
             current_decided_idx: 0,
             omnipaxos_msg_buffer,
-            output_file,
-            peers: config.get_peers(config.server_id),
+            peers: config.get_peers(config.local.server_id),
             config,
-        };
-        // Save config to output file
-        server.save_output().expect("Failed to write to file");
-        server
+        }
     }
 
     pub async fn run(&mut self) {
+        // Save config to output file
+        // self.save_output().expect("Failed to write to file");
         let mut client_msg_buf = Vec::with_capacity(NETWORK_BATCH_SIZE);
         let mut cluster_msg_buf = Vec::with_capacity(NETWORK_BATCH_SIZE);
         // We don't use Omnipaxos leader election and instead force an initial leader
         // Once the leader is established it chooses a synchronization point which the
         // followers relay to their clients to begin the experiment.
-        if self.config.initial_leader == self.id {
+        if self.config.cluster.initial_leader == self.id {
             self.become_initial_leader(&mut cluster_msg_buf, &mut client_msg_buf)
                 .await;
             let experiment_sync_start = (Utc::now() + Duration::from_secs(2)).timestamp_millis();
@@ -227,7 +203,7 @@ impl OmniPaxosServer {
     }
 
     fn send_client_start_signals(&mut self, start_time: Timestamp) {
-        for client_id in 1..self.config.num_clients as ClientId + 1 {
+        for client_id in 1..self.config.local.num_clients as ClientId + 1 {
             debug!("Sending start message to client {client_id}");
             let msg = ServerMessage::StartSignal(start_time);
             self.network.send_to_client(client_id, msg);
@@ -236,8 +212,9 @@ impl OmniPaxosServer {
 
     fn save_output(&mut self) -> Result<(), std::io::Error> {
         let config_json = serde_json::to_string_pretty(&self.config)?;
-        self.output_file.write_all(config_json.as_bytes())?;
-        self.output_file.flush()?;
+        let mut output_file = File::create(&self.config.local.output_filepath)?;
+        output_file.write_all(config_json.as_bytes())?;
+        output_file.flush()?;
         Ok(())
     }
 }

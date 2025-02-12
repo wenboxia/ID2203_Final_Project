@@ -1,32 +1,49 @@
+use std::env;
+
+use config::{Config, ConfigError, Environment, File};
 use omnipaxos::{
     util::{FlexibleQuorum, NodeId},
-    ClusterConfig, OmniPaxosConfig, ServerConfig,
+    ClusterConfig as OmnipaxosClusterConfig, OmniPaxosConfig,
+    ServerConfig as OmnipaxosServerConfig,
 };
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OmniPaxosServerConfig {
-    pub location: String,
-    pub server_id: NodeId,
-    pub num_clients: usize,
-    pub output_filepath: String,
-    // Cluster-wide settings
-    pub local_deployment: Option<bool>,
-    pub cluster_name: String,
+pub struct ClusterConfig {
+    pub configuration_id: u32,
     pub nodes: Vec<NodeId>,
+    pub node_addrs: Vec<String>,
     pub initial_leader: NodeId,
     pub initial_flexible_quorum: Option<FlexibleQuorum>,
 }
 
-impl Into<OmniPaxosConfig> for OmniPaxosServerConfig {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LocalConfig {
+    pub location: Option<String>,
+    pub server_id: NodeId,
+    pub num_clients: usize,
+    pub listen_address: String,
+    pub listen_port: u16,
+    pub output_filepath: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OmniPaxosKVConfig {
+    #[serde(flatten)]
+    pub local: LocalConfig,
+    #[serde(flatten)]
+    pub cluster: ClusterConfig,
+}
+
+impl Into<OmniPaxosConfig> for OmniPaxosKVConfig {
     fn into(self) -> OmniPaxosConfig {
-        let cluster_config = ClusterConfig {
-            configuration_id: 1,
-            nodes: self.nodes,
-            flexible_quorum: self.initial_flexible_quorum,
+        let cluster_config = OmnipaxosClusterConfig {
+            configuration_id: self.cluster.configuration_id,
+            nodes: self.cluster.nodes,
+            flexible_quorum: self.cluster.initial_flexible_quorum,
         };
-        let server_config = ServerConfig {
-            pid: self.server_id,
+        let server_config = OmnipaxosServerConfig {
+            pid: self.local.server_id,
             ..Default::default()
         };
         OmniPaxosConfig {
@@ -36,9 +53,33 @@ impl Into<OmniPaxosConfig> for OmniPaxosServerConfig {
     }
 }
 
-impl OmniPaxosServerConfig {
+impl OmniPaxosKVConfig {
+    pub fn new() -> Result<Self, ConfigError> {
+        let local_config_file = match env::var("LOCAL_CONFIG_FILE") {
+            Ok(file_path) => file_path,
+            Err(_) => panic!("Requires LOCAL_CONFIG_FILE environment variable to be set"),
+        };
+        let cluster_config_file = match env::var("CLUSTER_CONFIG_FILE") {
+            Ok(file_path) => file_path,
+            Err(_) => panic!("Requires CLUSTER_CONFIG_FILE environment variable to be set"),
+        };
+        let config = Config::builder()
+            .add_source(File::with_name(&local_config_file))
+            .add_source(File::with_name(&cluster_config_file))
+            // Add-in/overwrite settings with environment variables (with a prefix of OMNIPAXOS)
+            .add_source(
+                Environment::with_prefix("OMNIPAXOS")
+                    .try_parsing(true)
+                    .list_separator(",")
+                    .with_list_parse_key("node_addrs"),
+            )
+            .build()?;
+        config.try_deserialize()
+    }
+
     pub fn get_peers(&self, node: NodeId) -> Vec<NodeId> {
-        self.nodes
+        self.cluster
+            .nodes
             .iter()
             .cloned()
             .filter(|&id| id != node)

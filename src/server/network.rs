@@ -5,10 +5,10 @@ use omnipaxos_kv::common::{
     messages::*,
     utils::*,
 };
-use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::{collections::HashMap, str::FromStr};
 use tokio::{
     io::AsyncWriteExt,
     sync::mpsc::{Sender, UnboundedSender},
@@ -20,11 +20,10 @@ use tokio::{
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
+use crate::configs::OmniPaxosKVConfig;
+
 pub struct Network {
-    cluster_name: String,
-    id: NodeId,
     peers: Vec<NodeId>,
-    is_local: bool,
     peer_connections: Vec<Option<PeerConnection>>,
     client_connections: HashMap<ClientId, ClientConnection>,
     max_client_id: Arc<Mutex<ClientId>>,
@@ -36,27 +35,45 @@ pub struct Network {
     cancel_token: CancellationToken,
 }
 
+fn get_addrs(config: OmniPaxosKVConfig) -> (SocketAddr, Vec<SocketAddr>) {
+    let listen_address_str = format!(
+        "{}:{}",
+        config.local.listen_address, config.local.listen_port
+    );
+    let listen_address = SocketAddr::from_str(&listen_address_str).expect(&format!(
+        "{listen_address_str} is an invalid listen address"
+    ));
+    let node_addresses: Vec<SocketAddr> = config
+        .cluster
+        .node_addrs
+        .into_iter()
+        .map(|addr_str| match addr_str.to_socket_addrs() {
+            Ok(mut addrs) => addrs.next().unwrap(),
+            Err(e) => panic!("Address {addr_str} is invalid: {e}"),
+        })
+        .collect();
+    (listen_address, node_addresses)
+}
+
 impl Network {
     // Creates a new network with connections other server nodes in the cluster and any clients.
     // Waits until connections to all servers and clients are established before resolving.
-    pub async fn new(
-        cluster_name: String,
-        id: NodeId,
-        nodes: Vec<NodeId>,
-        num_clients: usize,
-        local_deployment: bool,
-        batch_size: usize,
-    ) -> Self {
-        let peers: Vec<u64> = nodes.iter().cloned().filter(|node| *node != id).collect();
+    pub async fn new(config: OmniPaxosKVConfig, batch_size: usize) -> Self {
+        let (listen_address, node_addresses) = get_addrs(config.clone());
+        let id = config.local.server_id;
+        let peer_addresses: Vec<(NodeId, SocketAddr)> = config
+            .cluster
+            .nodes
+            .into_iter()
+            .zip(node_addresses.into_iter())
+            .filter(|(node_id, _addr)| *node_id != id)
+            .collect();
         let mut cluster_connections = vec![];
-        cluster_connections.resize_with(peers.len(), Default::default);
+        cluster_connections.resize_with(peer_addresses.len(), Default::default);
         let (cluster_message_sender, cluster_messages) = tokio::sync::mpsc::channel(batch_size);
         let (client_message_sender, client_messages) = tokio::sync::mpsc::channel(batch_size);
         let mut network = Self {
-            cluster_name,
-            is_local: local_deployment,
-            id,
-            peers,
+            peers: peer_addresses.iter().map(|(id, _)| *id).collect(),
             peer_connections: cluster_connections,
             client_connections: HashMap::new(),
             max_client_id: Arc::new(Mutex::new(0)),
@@ -67,14 +84,24 @@ impl Network {
             client_messages,
             cancel_token: CancellationToken::new(),
         };
-        network.initialize_connections(num_clients).await;
+        let num_clients = config.local.num_clients;
+        network
+            .initialize_connections(id, num_clients, peer_addresses, listen_address)
+            .await;
         network
     }
 
-    async fn initialize_connections(&mut self, num_clients: usize) {
+    async fn initialize_connections(
+        &mut self,
+        id: NodeId,
+        num_clients: usize,
+        peers: Vec<(NodeId, SocketAddr)>,
+        listen_address: SocketAddr,
+    ) {
         let (connection_sink, mut connection_source) = mpsc::channel(30);
-        let listener_handle = self.spawn_connection_listener(connection_sink.clone());
-        self.spawn_peer_connectors(connection_sink.clone());
+        let listener_handle =
+            self.spawn_connection_listener(connection_sink.clone(), listen_address);
+        self.spawn_peer_connectors(connection_sink.clone(), id, peers);
         while let Some(new_connection) = connection_source.recv().await {
             match new_connection {
                 NewConnection::ToPeer(connection) => {
@@ -99,16 +126,15 @@ impl Network {
     fn spawn_connection_listener(
         &self,
         connection_sender: Sender<NewConnection>,
+        listen_address: SocketAddr,
     ) -> tokio::task::JoinHandle<()> {
-        let port = 8000 + self.id as u16;
-        let listening_address = SocketAddr::from(([0, 0, 0, 0], port));
         let client_sender = self.client_message_sender.clone();
         let cluster_sender = self.cluster_message_sender.clone();
         let max_client_id_handle = self.max_client_id.clone();
         let batch_size = self.batch_size;
         let cancel_token = self.cancel_token.clone();
         tokio::spawn(async move {
-            let listener = TcpListener::bind(listening_address).await.unwrap();
+            let listener = TcpListener::bind(listen_address).await.unwrap();
             loop {
                 match listener.accept().await {
                     Ok((tcp_stream, socket_addr)) => {
@@ -181,18 +207,14 @@ impl Network {
         connection_sender.send(new_connection).await.unwrap();
     }
 
-    fn spawn_peer_connectors(&self, connection_sender: Sender<NewConnection>) {
-        let my_id = self.id;
-        let peers_to_contact: Vec<NodeId> =
-            self.peers.iter().cloned().filter(|&p| p > my_id).collect();
-        for peer in peers_to_contact {
-            let to_address = match get_node_addr(&self.cluster_name, peer, self.is_local) {
-                Ok(addr) => addr,
-                Err(e) => {
-                    log::error!("Error resolving DNS name of node {peer}: {e}");
-                    return;
-                }
-            };
+    fn spawn_peer_connectors(
+        &self,
+        connection_sender: Sender<NewConnection>,
+        my_id: NodeId,
+        peers: Vec<(NodeId, SocketAddr)>,
+    ) {
+        let peers_to_connect_to = peers.into_iter().filter(|(peer_id, _)| *peer_id < my_id);
+        for (peer, peer_address) in peers_to_connect_to {
             let reconnect_delay = Duration::from_secs(1);
             let mut reconnect_interval = tokio::time::interval(reconnect_delay);
             let cluster_sender = self.cluster_message_sender.clone();
@@ -203,7 +225,7 @@ impl Network {
                 // Establish connection
                 let peer_connection = loop {
                     reconnect_interval.tick().await;
-                    match TcpStream::connect(to_address).await {
+                    match TcpStream::connect(peer_address).await {
                         Ok(connection) => {
                             info!("New connection to node {peer}");
                             connection.set_nodelay(true).unwrap();

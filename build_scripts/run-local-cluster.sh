@@ -15,9 +15,10 @@ local_experiment_dir="../benchmarks/logs/local-run"
 mkdir -p "${local_experiment_dir}"
 
 # Run servers
+cluster_config_path="./cluster-config.toml"
 for ((i = 1; i <= cluster_size; i++)); do
-    config_path="./server-${i}-config.toml"
-    RUST_LOG=$rust_log CONFIG_FILE="$config_path" cargo run --manifest-path="../Cargo.toml" --bin server &
+    server_config_path="./server-${i}-config.toml"
+    RUST_LOG=$rust_log SERVER_CONFIG_FILE=$server_config_path CLUSTER_CONFIG_FILE=$cluster_config_path cargo run --manifest-path="../Cargo.toml" --bin server &
 done
 wait
 

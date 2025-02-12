@@ -5,7 +5,7 @@ use csv::Writer;
 use omnipaxos_kv::common::{kv::CommandId, utils::Timestamp};
 use serde::Serialize;
 
-use crate::client::ClientConfig;
+use crate::configs::ClientConfig;
 
 #[derive(Debug, Serialize, Clone, Copy)]
 struct RequestData {

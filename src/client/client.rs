@@ -1,23 +1,10 @@
-use crate::{data_collection::ClientData, network::Network};
+use crate::{configs::ClientConfig, data_collection::ClientData, network::Network};
 use chrono::Utc;
 use log::*;
-use omnipaxos_kv::common::{kv::*, messages::*, utils::Timestamp};
+use omnipaxos_kv::common::{kv::*, messages::*};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::interval;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ClientConfig {
-    pub cluster_name: String,
-    pub location: String,
-    pub server_id: NodeId,
-    pub requests: Vec<RequestInterval>,
-    pub local_deployment: Option<bool>,
-    pub sync_time: Option<Timestamp>,
-    pub summary_filepath: String,
-    pub output_filepath: String,
-}
 
 const NETWORK_BATCH_SIZE: usize = 100;
 
@@ -33,11 +20,8 @@ pub struct Client {
 
 impl Client {
     pub async fn new(config: ClientConfig) -> Self {
-        let local_deployment = config.local_deployment.unwrap_or(false);
         let network = Network::new(
-            config.cluster_name.clone(),
-            vec![config.server_id],
-            local_deployment,
+            vec![(config.server_id, config.server_address.clone())],
             NETWORK_BATCH_SIZE,
         )
         .await;
@@ -73,7 +57,7 @@ impl Client {
         let mut rng = rand::thread_rng();
         let mut intervals = intervals.iter();
         let first_interval = intervals.next().unwrap();
-        let mut read_ratio = first_interval.read_ratio;
+        let mut read_ratio = first_interval.get_read_ratio();
         let mut request_interval = interval(first_interval.get_request_delay());
         let mut next_interval = interval(first_interval.get_interval_duration());
         let _ = next_interval.tick().await;
@@ -175,27 +159,5 @@ impl Client {
         self.client_data
             .to_csv(self.config.output_filepath.clone())?;
         Ok(())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub struct RequestInterval {
-    duration_sec: u64,
-    requests_per_sec: u64,
-    read_ratio: f64,
-}
-
-impl RequestInterval {
-    fn get_interval_duration(self) -> Duration {
-        Duration::from_secs(self.duration_sec)
-    }
-
-    fn get_request_delay(self) -> Duration {
-        if self.requests_per_sec == 0 {
-            return Duration::from_secs(999999);
-        }
-        let delay_ms = 1000 / self.requests_per_sec;
-        assert!(delay_ms != 0);
-        Duration::from_millis(delay_ms)
     }
 }
