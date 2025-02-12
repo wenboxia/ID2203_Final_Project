@@ -1,4 +1,4 @@
-x-common-variables: &common-variables
+x-common-variables: &common-server-variables
   RUST_LOG: "debug"
   SERVER_CONFIG_FILE: "/app/server-config.toml"
   CLUSTER_CONFIG_FILE: "/app/cluster-config.toml"
@@ -14,26 +14,29 @@ services:
       dockerfile: server.dockerfile
     container_name: s1
     environment:
-      <<: *common-variables
+      <<: *common-server-variables
     volumes:
       - ./server-1-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
+      - ./logs/:/app/logs/
   s2:
     image: omnipaxos-server
     container_name: s2
     environment:
-      <<: *common-variables
+      <<: *common-server-variables
     volumes:
       - ./server-2-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
+      - ./logs/:/app/logs/
   s3:
     image: omnipaxos-server
     container_name: s3
     environment:
-      <<: *common-variables
+      <<: *common-server-variables
     volumes:
       - ./server-3-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
+      - ./logs/:/app/logs/
   c1:
     image: omnipaxos-client
     build:
@@ -43,15 +46,17 @@ services:
     environment:
       RUST_LOG: "debug"
       CONFIG_FILE: "/app/client-config.toml"
-      OMNIPAXOS_SERVER_ADDRESS: "s1:8000"
+      OMNIPAXOS_SERVER_ADDRESS: "s1:8000" # Overwrite server_address in client config TOML
     volumes:
       - ./client-1-config.toml:/app/client-config.toml
+      - ./logs/:/app/logs/
   c2:
     image: omnipaxos-client
     container_name: c2
     environment:
       RUST_LOG: "debug"
       CONFIG_FILE: "/app/client-config.toml"
-      OMNIPAXOS_SERVER_ADDRESS: "s2:8000"
+      OMNIPAXOS_SERVER_ADDRESS: "s2:8000" # Overwrite server_address in client config TOML
     volumes:
       - ./client-2-config.toml:/app/client-config.toml
+      - ./logs/:/app/logs/
