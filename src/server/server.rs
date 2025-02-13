@@ -167,7 +167,7 @@ impl OmniPaxosServer {
     }
 
     async fn handle_cluster_messages(&mut self, messages: &mut Vec<(NodeId, ClusterMessage)>) {
-        for (_from, message) in messages.drain(..) {
+        for (from, message) in messages.drain(..) {
             trace!("{}: Received {message:?}", self.id);
             match message {
                 ClusterMessage::OmniPaxosMessage(m) => {
@@ -175,6 +175,7 @@ impl OmniPaxosServer {
                     self.handle_decided_entries();
                 }
                 ClusterMessage::LeaderStartSignal(start_time) => {
+                    debug!("Received start message from peer {from}");
                     self.send_client_start_signals(start_time)
                 }
             }

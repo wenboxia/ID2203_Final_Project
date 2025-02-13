@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClusterConfig {
-    pub configuration_id: u32,
     pub nodes: Vec<NodeId>,
     pub node_addrs: Vec<String>,
     pub initial_leader: NodeId,
@@ -21,9 +20,9 @@ pub struct ClusterConfig {
 pub struct LocalConfig {
     pub location: Option<String>,
     pub server_id: NodeId,
-    pub num_clients: usize,
     pub listen_address: String,
     pub listen_port: u16,
+    pub num_clients: usize,
     pub output_filepath: String,
 }
 
@@ -38,7 +37,7 @@ pub struct OmniPaxosKVConfig {
 impl Into<OmniPaxosConfig> for OmniPaxosKVConfig {
     fn into(self) -> OmniPaxosConfig {
         let cluster_config = OmnipaxosClusterConfig {
-            configuration_id: self.cluster.configuration_id,
+            configuration_id: 1,
             nodes: self.cluster.nodes,
             flexible_quorum: self.cluster.initial_flexible_quorum,
         };
