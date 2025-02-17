@@ -43,6 +43,10 @@ class OmnipaxosCluster:
         self._gcp_ssh_client = GcpClusterSSHClient(self._gcp_cluster)
 
 
+    # TODO: Stopping ssh processes doesn't result in the processes spawned on the GCP instances
+    # to be killed. As a result servers keep running indefinitely which is wasteful and, if the
+    # instances are reused for another experiment, can cause a data race where new processes connect
+    # to the old processes before they are killed.
     def run(self, logs_directory: Path, pull_images: bool = False):
         """
         Starts servers and clients but only waits for client processes to exit before
@@ -57,19 +61,19 @@ class OmnipaxosCluster:
 
 
     def change_cluster_config(self, **kwargs):
-        self._cluster_config = self._cluster_config.with_updated(**kwargs)
+        self._cluster_config = self._cluster_config.update_omnipaxos_config(**kwargs)
 
 
     def change_server_config(self, server_id: int, **kwargs):
         server_config = self._get_server_config(server_id)
-        self._cluster_config.server_configs[server_id] = server_config.with_updated(
+        self._cluster_config.server_configs[server_id] = server_config.update_omnipaxos_config(
             **kwargs
         )
 
 
     def change_client_config(self, client_id: int, **kwargs):
         client_config = self._get_client_config(client_id)
-        self._cluster_config.client_configs[client_id] = client_config.with_updated(
+        self._cluster_config.client_configs[client_id] = client_config.update_omnipaxos_config(
             **kwargs
         )
 
@@ -148,66 +152,33 @@ class OmnipaxosCluster:
 
     def _start_server_command(self, server_id: int, pull_image: bool = False) -> str:
         config = self._get_server_config(server_id)
-        container_name = "server"
-        image_path = self._cluster_config.server_image
-        instance_config_location = "~/server-config.toml"
-        container_config_location = "/home/$(whoami)/server-config.toml"
-        instance_output_dir = "./results"
-        container_output_dir = "/app"
-        stderr_pipe = f"{instance_output_dir}/xerr-server-{config.server_id}.log"
-        server_config_toml = config.generate_server_toml(self._cluster_config)
-
-        # pull_command = f"docker pull {container_image_location} > /dev/null"
-        pull_command = f"docker pull {image_path}"
-        kill_prev_container_command = f"docker kill {container_name} > /dev/null 2>&1"
-        gen_config_command = f"mkdir -p {instance_output_dir} && echo -e '{server_config_toml}' > {instance_config_location}"
-        docker_command = f"""docker run \\
-            --name {container_name} \\
-            -p 800{config.server_id}:800{config.server_id} \\
-            --env RUST_LOG={config.rust_log} \\
-            --env CONFIG_FILE="{container_config_location}" \\
-            -v {instance_config_location}:{container_config_location} \\
-            -v {instance_output_dir}:{container_output_dir} \\
-            --rm \\
-            "{image_path}" \\
-            2> {stderr_pipe}"""
-        if pull_image:
-            full_command = f"{kill_prev_container_command}; {pull_command}; {gen_config_command} && {docker_command}"
-        else:
-            # Add a sleep to help avoid connecting to any currently shutting down servers.
-            full_command = f"{kill_prev_container_command}; sleep 1; {gen_config_command} && {docker_command}"
-        return full_command
+        op_config = config.omnipaxos_server_config
+        server_config_toml = config.generate_server_toml()
+        cluster_config_toml = self._cluster_config.generate_cluster_toml()
+        start_server_command = (
+            f"PULL_IMAGE={'true' if pull_image else 'false'}",
+            f"SERVER_IMAGE={self._cluster_config.server_image}",
+            f"SERVER_CONFIG_TOML=$(cat <<EOF\n{server_config_toml}\nEOF\n)",
+            f"CLUSTER_CONFIG_TOML=$(cat <<EOF\n{cluster_config_toml}\nEOF\n)",
+            f"LISTEN_PORT={op_config.listen_port}",
+            f"RUST_LOG={config.rust_log}",
+            f"SERVER_ID={op_config.server_id}",
+            "bash ./run_container.sh",
+        )
+        return " ".join(start_server_command)
 
 
     def _start_client_command(self, client_id: int, pull_image: bool = False) -> str:
         config = self._get_client_config(client_id)
-        container_name = "client"
-        image_path = self._cluster_config.client_image
-        instance_config_location = "~/client-config.toml"
-        container_config_location = f"/home/$(whoami)/client-config.toml"
-        instance_output_dir = "./results"
-        container_output_dir = "/app"
-        client_config_toml = config.generate_client_toml(self._cluster_config)
-
-        # pull_command = f"docker pull gcr.io/{container_image_location} > /dev/null"
-        # kill_prev_container_command = f"docker kill {container_name} > /dev/null 2>&1"
-        pull_command = f"docker pull {image_path}"
-        kill_prev_container_command = f"docker kill {container_name} > /dev/null 2>&1"
-        gen_config_command = f"mkdir -p {instance_output_dir} && echo -e '{client_config_toml}' > {instance_config_location}"
-        docker_command = f"""docker run \\
-        --name={container_name} \\
-        --rm \\
-        --env RUST_LOG={config.rust_log} \\
-        --env CONFIG_FILE={container_config_location} \\
-        -v {instance_config_location}:{container_config_location} \\
-        -v {instance_output_dir}:{container_output_dir} \\
-        {image_path}"""
-        if pull_image:
-            full_command = f"{kill_prev_container_command}; {pull_command}; {gen_config_command} && {docker_command}"
-        else:
-            # Add a sleep to help avoid connecting to any currently shutting down servers.
-            full_command = f"{kill_prev_container_command}; sleep 1; {gen_config_command} && {docker_command}"
-        return full_command
+        client_config_toml = config.generate_client_toml()
+        start_client_command = (
+            f"PULL_IMAGE={'true' if pull_image else 'false'}",
+            f"CLIENT_CONFIG_TOML=$(cat <<EOF\n{client_config_toml}\nEOF\n)",
+            f"RUST_LOG={config.rust_log}",
+            f"CLIENT_IMAGE={self._cluster_config.client_image}",
+            f"bash ./run_container.sh",
+        )
+        return " ".join(start_client_command)
 
 
 class OmnipaxosClusterBuilder:
@@ -216,7 +187,146 @@ class OmnipaxosClusterBuilder:
     Relies on environment variables from `./scripts/project_env.sh` to configure settings.
     """
 
-    def __init__(self, cluster_name: str) -> None:
+    def __init__(self, cluster_id: int) -> None:
+        env_vals = self._get_project_env_variables()
+        self.cluster_id = f"{cluster_id}"
+        self._project_id = env_vals["PROJECT_ID"]
+        self._service_account = env_vals["SERVICE_ACCOUNT"]
+        self._gcloud_ssh_user = env_vals["OSLOGIN_USERNAME"]
+        self._gcloud_oslogin_uid = env_vals['OSLOGIN_UID']
+        self._server_docker_image_name = env_vals["SERVER_DOCKER_IMAGE_NAME"]
+        self._client_docker_image_name = env_vals["CLIENT_DOCKER_IMAGE_NAME"]
+        self._instance_startup_script = self._get_instance_startup_script()
+        self._server_configs: dict[int, ServerConfig] = {}
+        self._client_configs: dict[int, ClientConfig] = {}
+        # Cluster-wide settings
+        self._initial_leader: int | None = None
+        self._initial_quorum: FlexibleQuorum | None = None
+        self._server_port: int = 8000
+
+    def server(
+        self,
+        server_id: int,
+        zone: str,
+        machine_type: str = "e2-standard-8",
+        rust_log: str = "info",
+    ):
+        if server_id in self._server_configs.keys():
+            raise ValueError(f"Server {server_id} already exists")
+        instance_name = f"user-{self._gcloud_oslogin_uid}-cluster-{self.cluster_id}-server-{server_id}"
+        instance_config = InstanceConfig(
+            name=instance_name,
+            zone=zone,
+            machine_type=machine_type,
+            startup_script=self._instance_startup_script,
+            custom_metadata={
+                "oslogin_user": self._gcloud_ssh_user,
+                "docker_image": self._server_docker_image_name,
+                "run_container_script": self._get_run_server_script(),
+            },
+            dns_name=instance_name,
+            service_account=self._service_account,
+        )
+        server_address =f"{instance_config.dns_name}.internal.zone.:{self._server_port}"
+        server_config = ServerConfig(
+            instance_config=instance_config,
+            server_address=server_address,
+            omnipaxos_server_config=ServerConfig.OmniPaxosKVServerConfig(
+                location=zone,
+                server_id=server_id,
+                listen_address="0.0.0.0",
+                listen_port=self._server_port,
+                num_clients=0,
+                output_filepath=f"server-{server_id}.json",
+            ),
+            rust_log=rust_log,
+        )
+        self._server_configs[server_id] = server_config
+        return self
+
+    def client(
+        self,
+        server_id: int,
+        zone: str,
+        requests: list[RequestInterval] = [],
+        machine_type: str = "e2-standard-2",
+        rust_log: str = "info",
+    ):
+        if server_id in self._client_configs.keys():
+            raise ValueError(f"Client {server_id} already exists")
+        instance_config = InstanceConfig(
+            name=f"user-{self._gcloud_oslogin_uid}-cluster-{self.cluster_id}-client-{server_id}",
+            zone=zone,
+            machine_type=machine_type,
+            startup_script=self._instance_startup_script,
+            service_account=self._service_account,
+            custom_metadata={
+                "oslogin_user": self._gcloud_ssh_user,
+                "docker_image": self._client_docker_image_name,
+                "run_container_script": self._get_run_client_script(),
+            },
+        )
+        client_config = ClientConfig(
+            instance_config=instance_config,
+            omnipaxos_client_config=ClientConfig.OmniPaxosKVClientConfig(
+                location=zone,
+                server_id=server_id,
+                server_address="",
+                requests=requests,
+                summary_filepath=f"client-{server_id}.json",
+                output_filepath=f"client-{server_id}.csv",
+            ),
+            rust_log=rust_log,
+        )
+        self._client_configs[server_id] = client_config
+        return self
+
+    def initial_leader(self, initial_leader: int):
+        self._initial_leader = initial_leader
+        return self
+
+    def initial_quorum(self, flex_quorum: FlexibleQuorum):
+        self._initial_quorum = flex_quorum
+        return self
+
+    def build(self) -> OmnipaxosCluster:
+        # Add num_clients to server configs
+        for server_id, server_config in self._server_configs.items():
+            client_configs = self._client_configs.values()
+            server_id_matches = sum(
+                1 for _ in filter(lambda c: c.omnipaxos_client_config.server_id == server_id, client_configs)
+            )
+            total_matches = server_id_matches
+            self._server_configs[server_id] = server_config.update_omnipaxos_config(num_clients=total_matches)
+
+        # Add server_address to client configs
+        for client_id, client_config in self._client_configs.items():
+            server_config = self._server_configs[client_config.omnipaxos_client_config.server_id]
+            self._client_configs[client_id] = client_config.update_omnipaxos_config(server_address=server_config.server_address)
+
+        if self._initial_leader is None:
+            raise ValueError("Need to set cluster's initial leader")
+
+        nodes = sorted(self._server_configs.keys())
+        node_addrs = list(map(lambda id: self._server_configs[id].server_address, nodes))
+
+        cluster_config = ClusterConfig(
+            omnipaxos_cluster_config=ClusterConfig.OmniPaxosKVClusterConfig(
+                nodes=nodes,
+                node_addrs=node_addrs,
+                initial_leader=self._initial_leader,
+                initial_flexible_quorum=self._initial_quorum,
+            ),
+            server_configs=self._server_configs,
+            client_configs=self._client_configs,
+            client_image=self._client_docker_image_name,
+            server_image=self._server_docker_image_name,
+        )
+        return OmnipaxosCluster(self._project_id, cluster_config)
+
+
+    @staticmethod
+    def _get_project_env_variables() -> dict[str,str]:
         env_keys = [
             "PROJECT_ID",
             "SERVICE_ACCOUNT",
@@ -234,132 +344,22 @@ class OmnipaxosClusterBuilder:
                 env_vals[key] = value
         for key in env_keys:
             raise ValueError(f"{key} env var must be set. Sourcing from ./scripts/project_env.sh")
-        self.cluster_name = f"{cluster_name}"
-        self._project_id = env_vals["PROJECT_ID"]
-        self._service_account = env_vals["SERVICE_ACCOUNT"]
-        self._gcloud_ssh_user = env_vals["OSLOGIN_USERNAME"]
-        self._gcloud_oslogin_uid = env_vals['OSLOGIN_UID']
-        self._server_docker_image_name = env_vals["SERVER_DOCKER_IMAGE_NAME"]
-        self._client_docker_image_name = env_vals["CLIENT_DOCKER_IMAGE_NAME"]
-        self._server_configs: dict[int, ServerConfig] = {}
-        self._client_configs: dict[int, ClientConfig] = {}
-        # Cluster-wide settings
-        self._initial_leader: int | None = None
-        self._initial_quorum: FlexibleQuorum | None = None
+        return env_vals
 
-    def server(
-        self,
-        server_id: int,
-        zone: str,
-        machine_type: str = "e2-standard-8",
-        rust_log: str = "info",
-    ):
-        if server_id in self._server_configs.keys():
-            raise ValueError(f"Server {server_id} already exists")
-        instance_config = InstanceConfig(
-            f"{self.cluster_name}-server-{server_id}-{self._gcloud_oslogin_uid}",
-            zone,
-            machine_type,
-            self._docker_startup_script(self._server_docker_image_name),
-            dns_name=f"{self.cluster_name}-server-{server_id}",
-            service_account=self._service_account,
-        )
-        server_config = ServerConfig(
-            instance_config=instance_config,
-            server_id=server_id,
-            num_clients=0,
-            output_filepath=f"server-{server_id}.json",
-            rust_log=rust_log,
-        )
-        self._server_configs[server_id] = server_config
-        return self
 
-    def client(
-        self,
-        server_id: int,
-        zone: str,
-        requests: list[RequestInterval] = [],
-        machine_type: str = "e2-standard-2",
-        rust_log: str = "info",
-    ):
-        if server_id in self._client_configs.keys():
-            raise ValueError(f"Client {server_id} already exists")
-        instance_config = InstanceConfig(
-            f"{self.cluster_name}-client-{server_id}-{self._gcloud_oslogin_uid}",
-            zone,
-            machine_type,
-            self._docker_startup_script(self._client_docker_image_name),
-            service_account=self._service_account,
-        )
-        client_config = ClientConfig(
-            instance_config=instance_config,
-            server_id=server_id,
-            requests=requests,
-            summary_filepath=f"client-{server_id}.json",
-            output_filepath=f"client-{server_id}.csv",
-            rust_log=rust_log,
-        )
-        self._client_configs[server_id] = client_config
-        return self
+    @staticmethod
+    def _get_instance_startup_script() -> str:
+        with open("./startup_scripts/instance_startup_script.sh", "r") as f:
+            return f.read()
 
-    def initial_leader(self, initial_leader: int):
-        self._initial_leader = initial_leader
-        return self
 
-    def initial_quorum(self, flex_quorum: FlexibleQuorum):
-        self._initial_quorum = flex_quorum
-        return self
+    @staticmethod
+    def _get_run_server_script() -> str:
+        with open("./startup_scripts/run_server.sh", "r") as f:
+            return f.read()
 
-    def build(self) -> OmnipaxosCluster:
-        # Edit server configs based on cluster-wide settings
-        for server_id, server_config in self._server_configs.items():
-            client_configs = self._client_configs.values()
-            server_id_matches = sum(
-                1 for _ in filter(lambda c: c.server_id == server_id, client_configs)
-            )
-            total_matches = server_id_matches
-            self._server_configs[server_id] = replace(
-                server_config, num_clients=total_matches
-            )
 
-        if self._initial_leader is None:
-            raise ValueError("Need to set cluster's initial leader")
-
-        cluster_config = ClusterConfig(
-            cluster_name=self.cluster_name,
-            nodes=sorted(self._server_configs.keys()),
-            initial_leader=self._initial_leader,
-            initial_flexible_quorum=self._initial_quorum,
-            server_configs=self._server_configs,
-            client_configs=self._client_configs,
-            client_image=self._client_docker_image_name,
-            server_image=self._server_docker_image_name,
-        )
-        return OmnipaxosCluster(self._project_id, cluster_config)
-
-    def _docker_startup_script(
-        self,
-        image_path: str,
-    ) -> str:
-        """
-        Generates the startup script for a Omnipaxos client on a GCP instance.
-
-        This script is executed during instance creation and configures Docker to use GCR.
-        For debugging, SSH into the instance and run `sudo journalctl -u google-startup-scripts.service`.
-        """
-        user = self._gcloud_ssh_user
-        return f"""#! /bin/bash
-# Ensure OS login user is setup
-useradd -m {user}
-mkdir -p /home/{user}
-chown {user}:{user} /home/{user}
-
-# Configure Docker credentials for the user
-sudo -u {user} docker-credential-gcr configure-docker --registries=gcr.io
-sudo -u {user} echo "https://gcr.io" | docker-credential-gcr get
-sudo groupadd docker
-sudo usermod -aG docker {user}
-
-# Pull the container as user
-sudo -u {user} docker pull "{image_path}"
-"""
+    @staticmethod
+    def _get_run_client_script() -> str:
+        with open("./startup_scripts/run_client.sh", "r") as f:
+            return f.read()

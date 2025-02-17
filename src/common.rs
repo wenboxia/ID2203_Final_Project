@@ -116,29 +116,13 @@ pub mod kv {
 }
 
 pub mod utils {
-    use super::{kv::NodeId, messages::*};
-    use std::net::{SocketAddr, ToSocketAddrs};
+    use super::messages::*;
     use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
     use tokio::net::TcpStream;
     use tokio_serde::{formats::Bincode, Framed};
     use tokio_util::codec::{Framed as CodecFramed, FramedRead, FramedWrite, LengthDelimitedCodec};
 
     pub type Timestamp = i64;
-
-    pub fn get_node_addr(
-        cluster_name: &String,
-        node: NodeId,
-        is_local: bool,
-    ) -> Result<SocketAddr, std::io::Error> {
-        let dns_name = if is_local {
-            // format!("s{node}:800{node}")
-            format!("localhost:800{node}")
-        } else {
-            format!("{cluster_name}-server-{node}.internal.zone.:800{node}")
-        };
-        let address = dns_name.to_socket_addrs()?.next().unwrap();
-        Ok(address)
-    }
 
     pub type RegistrationConnection = Framed<
         CodecFramed<TcpStream, LengthDelimitedCodec>,

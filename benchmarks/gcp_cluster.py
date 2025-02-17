@@ -15,6 +15,7 @@ class InstanceConfig:
     zone: str
     machine_type: str
     startup_script: str
+    custom_metadata: Optional[dict] = None
     firewall_tag: Optional[str] = None
     dns_name: Optional[str] = None
     service_account: Optional[str] = None
@@ -255,21 +256,20 @@ Run: gcloud dns managed-zones create internal-network \\
                 ),
             ],
         )
-        metadata = types.Metadata(
-            # Create with startup script
-            items=[
-                {
-                    "key": "startup-script",
-                    "value": instance_config.startup_script,
-                },
-                {"key": "enable-oslogin", "value": "TRUE"},
-            ]
-            # # Create as a kubernetes cluster
-            # items=[{
-            #     "key":"gce-container-declaration",
-            #     "value": startup_script,
-            #     }],
-        )
+        metadata_items = [
+            {
+                "key": "startup-script",
+                "value": instance_config.startup_script,
+            },
+            {
+                "key": "enable-oslogin",
+                "value": "TRUE"
+            },
+        ]
+        if instance_config.custom_metadata is not None:
+            for k, v in instance_config.custom_metadata.items():
+                metadata_items.append({"key": k, "value": v})
+        metadata = types.Metadata(items=metadata_items)
         tags = types.Tags()
         if instance_config.firewall_tag:
             tags.items = [instance_config.firewall_tag]

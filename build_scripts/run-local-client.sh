@@ -10,8 +10,8 @@ interrupt() {
 }
 trap "interrupt" SIGINT
 
-# Clients' output is saved into bencharking directory
-local_experiment_dir="../benchmarks/logs/local-run"
+# Clients' output is saved into logs dir
+local_experiment_dir="./logs"
 mkdir -p "${local_experiment_dir}"
 
 # Run clients
