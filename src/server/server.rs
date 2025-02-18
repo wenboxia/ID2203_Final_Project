@@ -52,17 +52,10 @@ impl OmniPaxosServer {
         self.save_output().expect("Failed to write to file");
         let mut client_msg_buf = Vec::with_capacity(NETWORK_BATCH_SIZE);
         let mut cluster_msg_buf = Vec::with_capacity(NETWORK_BATCH_SIZE);
-        // We don't use Omnipaxos leader election and instead force an initial leader
-        // Once the leader is established it chooses a synchronization point which the
-        // followers relay to their clients to begin the experiment.
-        if self.config.cluster.initial_leader == self.id {
-            self.become_initial_leader(&mut cluster_msg_buf, &mut client_msg_buf)
-                .await;
-            let experiment_sync_start = (Utc::now() + Duration::from_secs(2)).timestamp_millis();
-            self.send_cluster_start_signals(experiment_sync_start);
-            self.send_client_start_signals(experiment_sync_start);
-        }
-        // Main event loop
+        // We don't use Omnipaxos leader election at first and instead force a specific initial leader
+        self.establish_initial_leader(&mut cluster_msg_buf, &mut client_msg_buf)
+            .await;
+        // Main event loop with leader election
         let mut election_interval = tokio::time::interval(ELECTION_TIMEOUT);
         loop {
             tokio::select! {
@@ -80,8 +73,10 @@ impl OmniPaxosServer {
         }
     }
 
-    // Ensures cluster is connected and leader is promoted before returning.
-    async fn become_initial_leader(
+    // Ensures cluster is connected and initial leader is promoted before returning.
+    // Once the leader is established it chooses a synchronization point which the
+    // followers relay to their clients to begin the experiment.
+    async fn establish_initial_leader(
         &mut self,
         cluster_msg_buffer: &mut Vec<(NodeId, ClusterMessage)>,
         client_msg_buffer: &mut Vec<(ClientId, ClientMessage)>,
@@ -89,10 +84,13 @@ impl OmniPaxosServer {
         let mut leader_takeover_interval = tokio::time::interval(LEADER_WAIT);
         loop {
             tokio::select! {
-                _ = leader_takeover_interval.tick() => {
+                _ = leader_takeover_interval.tick(), if self.config.cluster.initial_leader == self.id => {
                     if let Some((curr_leader, is_accept_phase)) = self.omnipaxos.get_current_leader(){
                         if curr_leader == self.id && is_accept_phase {
                             info!("{}: Leader fully initialized", self.id);
+                            let experiment_sync_start = (Utc::now() + Duration::from_secs(2)).timestamp_millis();
+                            self.send_cluster_start_signals(experiment_sync_start);
+                            self.send_client_start_signals(experiment_sync_start);
                             break;
                         }
                     }
@@ -101,7 +99,10 @@ impl OmniPaxosServer {
                     self.send_outgoing_msgs();
                 },
                 _ = self.network.cluster_messages.recv_many(cluster_msg_buffer, NETWORK_BATCH_SIZE) => {
-                    self.handle_cluster_messages(cluster_msg_buffer).await;
+                    let recv_start = self.handle_cluster_messages(cluster_msg_buffer).await;
+                    if recv_start {
+                        break;
+                    }
                 },
                 _ = self.network.client_messages.recv_many(client_msg_buffer, NETWORK_BATCH_SIZE) => {
                     self.handle_client_messages(client_msg_buffer).await;
@@ -166,7 +167,11 @@ impl OmniPaxosServer {
         self.send_outgoing_msgs();
     }
 
-    async fn handle_cluster_messages(&mut self, messages: &mut Vec<(NodeId, ClusterMessage)>) {
+    async fn handle_cluster_messages(
+        &mut self,
+        messages: &mut Vec<(NodeId, ClusterMessage)>,
+    ) -> bool {
+        let mut received_start_signal = false;
         for (from, message) in messages.drain(..) {
             trace!("{}: Received {message:?}", self.id);
             match message {
@@ -176,11 +181,13 @@ impl OmniPaxosServer {
                 }
                 ClusterMessage::LeaderStartSignal(start_time) => {
                     debug!("Received start message from peer {from}");
-                    self.send_client_start_signals(start_time)
+                    received_start_signal = true;
+                    self.send_client_start_signals(start_time);
                 }
             }
         }
         self.send_outgoing_msgs();
+        received_start_signal
     }
 
     fn append_to_log(&mut self, from: ClientId, command_id: CommandId, kv_command: KVCommand) {
