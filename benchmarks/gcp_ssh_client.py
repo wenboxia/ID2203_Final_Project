@@ -1,4 +1,6 @@
+import signal
 import subprocess
+import sys
 import time
 
 from gcp_cluster import GcpCluster
@@ -14,9 +16,12 @@ class GcpClusterSSHClient:
     _processes: dict[str, tuple[subprocess.Popen, str, str]]
     _gcp_cluster: GcpCluster
 
-    def __init__(self, gcp_cluster: GcpCluster):
+    def __init__(self, gcp_cluster: GcpCluster, kill_process_command: str):
         self._processes = {}
         self._gcp_cluster = gcp_cluster
+        self._kill_command = kill_process_command
+        signal.signal(signal.SIGINT, self._cleanup_handler)
+        signal.signal(signal.SIGTERM, self._cleanup_handler)
 
     def start_process(self, process_id: str, instance_name: str, ssh_command: str):
         running_process = self._processes.get(process_id)
@@ -37,13 +42,22 @@ class GcpClusterSSHClient:
         for id in process_ids:
             self.restart_process(id)
 
-    def stop_process(self, process_id: str):
-        process, _, _ = self._get_process(process_id)
+    def stop_process(self, process_id) -> subprocess.Popen:
+        process, instance_name, _ = self._get_process(process_id)
         process.terminate()
+        self._processes.pop(process_id)
+        kill_process = self._gcp_cluster.ssh_command(instance_name, self._kill_command)
+        return kill_process
 
     def stop_processes(self, process_ids: list[str]):
+        processes = []
         for process_id in process_ids:
-            self.stop_process(process_id)
+            kill_process = self.stop_process(process_id)
+            processes.append(kill_process)
+        if len(processes) > 0:
+            print("Shuting down remote processes...")
+        for process in processes:
+            process.wait()
 
     def await_processes(self, process_ids: list[str], timeout: int = 600):
         print(f"Awaiting processes: {process_ids} ...")
@@ -55,7 +69,7 @@ class GcpClusterSSHClient:
 
     def await_processes_concurrent(
         self, process_ids: list[str], timeout: int | None = None
-    ):
+    ) -> bool:
         """
         Concurrently waits for processes to finish, retrying if SSH connection fails. Aborts processes if timeout (in seconds)
         is reached.
@@ -80,7 +94,6 @@ class GcpClusterSSHClient:
                     a_process_failed = True
 
             if a_process_failed:
-                self.stop_processes(all_processes)
                 if retries < 3:
                     time.sleep(2)
                     print(f"RETRYING CLIENT AND SERVER SSH CONNECTIONS...")
@@ -88,24 +101,31 @@ class GcpClusterSSHClient:
                     retries += 1
                     self.restart_processes(all_processes)
                 else:
-                    print("Failed SSH 3 times, aborting cluster.")
-                    break
+                    print("Failed SSH 3 times, aborting cluster await.")
+                    return False
             elif a_process_is_running:
                 time.sleep(1)
                 ticks += 1
                 if timeout is not None and ticks > timeout:
-                    print("Timeout reached, stopping all processes.")
-                    self.stop_processes(all_processes)
-                    break
+                    print("Timeout reached, aborting cluster await.")
+                    return False
             else:
                 print("Cluster finished successfully.")
-                break
+                return True
 
     def clear(self):
         self._processes.clear()
+
+    def clear_processes(self, processes: list[str]):
+        for id in processes:
+            _ = self._processes.pop(id)
 
     def _get_process(self, process_id: str) -> tuple[subprocess.Popen, str, str]:
         process = self._processes.get(process_id)
         if process is None:
             raise ValueError(f"Process {process_id} doesn't exist")
         return process
+
+    def _cleanup_handler(self, signum, frame):
+        self.stop_processes(list(self._processes.keys()))
+        sys.exit(0)

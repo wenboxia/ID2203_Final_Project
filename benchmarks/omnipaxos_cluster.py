@@ -23,7 +23,7 @@ class OmnipaxosCluster:
          DNS names to the servers.
     5-6. Use `run()` to SSH into client and server instances, pass configuration files,
          and run Docker containers from the artifact registry. This also waits for client processes to finish
-         and then pulls logs from the server and client GCP instances
+         and then kills the remote processes and pulls logs from the server and client GCP instances
     7.   Use `shutdown()` to shut down the GCP instances (or leave them running for reuse).
     """
 
@@ -40,24 +40,26 @@ class OmnipaxosCluster:
             [c.instance_config for c in cluster_config.client_configs.values()]
         )
         self._gcp_cluster = GcpCluster(project_id, instance_configs)
-        self._gcp_ssh_client = GcpClusterSSHClient(self._gcp_cluster)
+        kill_command = (
+            "docker kill client > /dev/null 2>&1; docker kill server > /dev/null 2>&1"
+        )
+        self._gcp_ssh_client = GcpClusterSSHClient(self._gcp_cluster, kill_command)
 
 
-    # TODO: Stopping ssh processes doesn't result in the processes spawned on the GCP instances
-    # to be killed. As a result servers keep running indefinitely which is wasteful and, if the
-    # instances are reused for another experiment, can cause a data race where new processes connect
-    # to the old processes before they are killed.
     def run(self, logs_directory: Path, pull_images: bool = False):
         """
         Starts servers and clients but only waits for client processes to exit before
-        pulling logs.
+        killing remote processes and pulling logs.
         """
         server_process_ids = self._start_servers(pull_images=pull_images)
         client_process_ids = self._start_clients(pull_images=pull_images)
-        self._gcp_ssh_client.await_processes_concurrent(client_process_ids)
-        self._gcp_ssh_client.stop_processes(server_process_ids)
+        clients_finished = self._gcp_ssh_client.await_processes_concurrent(client_process_ids)
+        if clients_finished:
+            self._gcp_ssh_client.clear_processes(client_process_ids)
+            self._gcp_ssh_client.stop_processes(server_process_ids)
+        else:
+            self._gcp_ssh_client.stop_processes(server_process_ids + client_process_ids)
         self._get_logs(logs_directory)
-        self._gcp_ssh_client.clear()
 
 
     def change_cluster_config(self, **kwargs):
