@@ -95,6 +95,8 @@ class GcpClusterSSHClient:
 
             if a_process_failed:
                 if retries < 3:
+                    for process_id in all_processes:
+                        self._processes[process_id][0].terminate()
                     time.sleep(2)
                     print(f"RETRYING CLIENT AND SERVER SSH CONNECTIONS...")
                     time.sleep(8)
