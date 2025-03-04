@@ -1,3 +1,8 @@
+# PROJECT-SPECIFIC IGNORES
+logs/
+project_env.sh
+
+# GENERATED IGNORES
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -194,16 +199,3 @@ Temporary Items
 
 # End of https://www.toptal.com/developers/gitignore/api/macos
 
-# Python uv
-# uv.lock
-
-# Secrets
-master-service-account-key.json
-service-account-key.json
-
-# Generated files
-logs/
-graphs/
-
-# User specific config
-project_env.sh

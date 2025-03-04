@@ -1,3 +1,6 @@
+# NOTE: Dont use `docker compose up --build` because s2-s5 will pull a stale image that
+# won't reflect any changes s1 makes to the image in the build step. Instead call
+# `docker compose build` then `docker compose up`.
 x-common-variables: &common-server-variables
   RUST_LOG: "debug"
   SERVER_CONFIG_FILE: "/app/server-config.toml"
