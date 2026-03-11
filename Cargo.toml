@@ -26,3 +26,11 @@ path = "src/client/main.rs"
 [[bin]]
 name = "server"
 path = "src/server/main.rs"
+
+[[bin]]
+name = "maelstrom-node"
+path = "src/bin/maelstrom_node.rs"
+
+[[bin]]
+name = "jepsen-harness"
+path = "src/bin/jepsen_harness.rs"

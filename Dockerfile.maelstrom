@@ -1,0 +1,49 @@
+# Multi-stage Dockerfile for running Maelstrom tests against OmniPaxos
+#
+# Usage:
+#   docker build -f Dockerfile.maelstrom -t omnipaxos-jepsen .
+#   docker run --rm -v $(pwd)/test-results:/app/test-results omnipaxos-jepsen [test_name]
+#
+# test_name: basic, partition, kill, all-faults, all (default: basic)
+
+# ---- Stage 1: Build the Rust binary ----
+FROM rust:1.77-bookworm AS builder
+
+WORKDIR /app
+COPY . .
+
+RUN cargo build --release --bin maelstrom-node
+
+# ---- Stage 2: Runtime with Maelstrom ----
+FROM debian:bookworm-slim
+
+# Install runtime dependencies: Java (for Maelstrom), curl, graphviz, gnuplot
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    default-jre-headless \
+    curl \
+    graphviz \
+    gnuplot-nox \
+    bzip2 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Maelstrom
+ARG MAELSTROM_VERSION=0.2.3
+RUN curl -LO "https://github.com/jepsen-io/maelstrom/releases/download/v${MAELSTROM_VERSION}/maelstrom.tar.bz2" \
+    && tar xjf maelstrom.tar.bz2 \
+    && rm maelstrom.tar.bz2
+
+# Copy the built binary
+COPY --from=builder /app/target/release/maelstrom-node /app/target/release/maelstrom-node
+
+# Copy test scripts
+COPY scripts/ /app/scripts/
+RUN chmod +x /app/scripts/*.sh
+
+ENV MAELSTROM_DIR=/app/maelstrom
+
+# Default: run basic test
+ENTRYPOINT ["/app/scripts/run_tests.sh"]
+CMD ["basic"]

@@ -1,0 +1,50 @@
+# Docker Compose for running Maelstrom Jepsen tests
+#
+# Usage:
+#   docker compose -f docker-compose.maelstrom.yml run --rm jepsen-basic
+#   docker compose -f docker-compose.maelstrom.yml run --rm jepsen-partition
+#   docker compose -f docker-compose.maelstrom.yml run --rm jepsen-kill
+#   docker compose -f docker-compose.maelstrom.yml run --rm jepsen-all
+
+services:
+  # Base service definition (not directly runnable)
+  jepsen-base: &jepsen-base
+    build:
+      context: .
+      dockerfile: Dockerfile.maelstrom
+    volumes:
+      - ./test-results:/app/test-results
+
+  # Test: Basic linearizability (no faults)
+  jepsen-basic:
+    <<: *jepsen-base
+    command: ["basic"]
+
+  # Test: Network partitions (isolate leader / split-brain)
+  jepsen-partition:
+    <<: *jepsen-base
+    command: ["partition"]
+    environment:
+      - TIME_LIMIT=120
+
+  # Test: Node crashes and restarts
+  jepsen-kill:
+    <<: *jepsen-base
+    command: ["kill"]
+    environment:
+      - TIME_LIMIT=120
+
+  # Test: Combined partitions + crashes
+  jepsen-all-faults:
+    <<: *jepsen-base
+    command: ["all-faults"]
+    environment:
+      - TIME_LIMIT=120
+      - CONCURRENCY=10
+
+  # Test: Run all test suites
+  jepsen-all:
+    <<: *jepsen-base
+    command: ["all"]
+    environment:
+      - TIME_LIMIT=60

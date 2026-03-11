@@ -1,5 +1,9 @@
 # PROJECT-SPECIFIC IGNORES
 logs/
+maelstrom/
+store/
+test-results/
+.claude/
 
 # GENERATED IGNORES
 # Created by https://www.toptal.com/developers/gitignore/api/rust
