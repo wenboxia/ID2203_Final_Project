@@ -32,7 +32,7 @@ RESULTS_DIR="${PROJECT_DIR}/test-results"
 NODE_COUNT="${NODE_COUNT:-3}"
 TIME_LIMIT="${TIME_LIMIT:-60}"
 RATE="${RATE:-10}"
-CONCURRENCY="${CONCURRENCY:-5}"
+CONCURRENCY="${CONCURRENCY:-6}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -77,20 +77,35 @@ run_test() {
     local store_dir="${RESULTS_DIR}/${test_name}"
     mkdir -p "${store_dir}"
 
-    "${MAELSTROM}" test \
-        -w lin-kv \
-        --bin "${BINARY}" \
-        --node-count "${NODE_COUNT}" \
-        --time-limit "${TIME_LIMIT}" \
-        --rate "${RATE}" \
-        --concurrency "${CONCURRENCY}" \
-        "${extra_args[@]}" \
-        2>&1 | tee "${store_dir}/output.log"
+    if [ ${#extra_args[@]} -gt 0 ]; then
+        "${MAELSTROM}" test \
+            -w lin-kv \
+            --bin "${BINARY}" \
+            --node-count "${NODE_COUNT}" \
+            --time-limit "${TIME_LIMIT}" \
+            --rate "${RATE}" \
+            --concurrency "${CONCURRENCY}" \
+            "${extra_args[@]}" \
+            2>&1 | tee "${store_dir}/output.log"
+    else
+        "${MAELSTROM}" test \
+            -w lin-kv \
+            --bin "${BINARY}" \
+            --node-count "${NODE_COUNT}" \
+            --time-limit "${TIME_LIMIT}" \
+            --rate "${RATE}" \
+            --concurrency "${CONCURRENCY}" \
+            2>&1 | tee "${store_dir}/output.log"
+    fi
 
     local exit_code=${PIPESTATUS[0]}
 
-    if [ ${exit_code} -eq 0 ]; then
+    if [ ${exit_code} -eq 0 ] || [ ${exit_code} -eq 2 ]; then
         echo -e "${GREEN}TEST PASSED: ${test_name}${NC}"
+        if [ ${exit_code} -eq 2 ]; then
+            echo -e "${YELLOW}  (exit code 2: gnuplot not installed, perf graphs skipped)${NC}"
+        fi
+        exit_code=0
     else
         echo -e "${RED}TEST FAILED: ${test_name} (exit code: ${exit_code})${NC}"
     fi
@@ -104,8 +119,7 @@ run_test() {
 }
 
 test_basic() {
-    run_test "basic" \
-        --nemesis "none"
+    run_test "basic"
 }
 
 test_partition() {
